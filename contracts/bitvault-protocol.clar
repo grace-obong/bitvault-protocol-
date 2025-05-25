@@ -354,3 +354,39 @@
   ;; Get vault information for a specific owner
   (map-get? vaults owner)
 )
+
+(define-read-only (get-collateral-ratio (owner principal))
+  ;; Calculate and return the collateral ratio for a vault
+  (let (
+      (vault (unwrap! (map-get? vaults owner) err-low-balance))
+      (collateral (get collateral vault))
+      (debt (get debt vault))
+    )
+    (if (is-eq debt u0)
+      (ok u0)
+      (ok (/ (* collateral (var-get last-price)) debt))
+    )
+  )
+)
+
+(define-read-only (is-authorized-liquidator (address principal))
+  ;; Check if an address is an authorized liquidator
+  (default-to false (map-get? liquidators address))
+)
+
+(define-read-only (is-authorized-oracle (address principal))
+  ;; Check if an address is an authorized price oracle
+  (default-to false (map-get? price-oracles address))
+)
+
+(define-read-only (get-stability-parameters)
+  ;; Get all current protocol stability parameters
+  {
+    minimum-collateral-ratio: (var-get minimum-collateral-ratio),
+    liquidation-ratio: (var-get liquidation-ratio),
+    stability-fee: (var-get stability-fee),
+    price: (var-get last-price),
+    price-valid: (var-get price-valid),
+    emergency-shutdown: (var-get emergency-shutdown),
+  }
+)
