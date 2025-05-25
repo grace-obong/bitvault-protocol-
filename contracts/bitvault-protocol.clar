@@ -180,3 +180,94 @@
     )
   )
 )
+
+(define-public (withdraw-collateral (amount uint))
+  ;; Withdraw collateral from vault while maintaining collateralization ratio
+  (let (
+      (vault (unwrap! (map-get? vaults tx-sender) err-low-balance))
+      (current-collateral (get collateral vault))
+      (current-debt (get debt vault))
+      (new-collateral (- current-collateral amount))
+      (collateral-value (* new-collateral (var-get last-price)))
+    )
+    (begin
+      (asserts! (var-get initialized) err-not-initialized)
+      (asserts! (not (var-get emergency-shutdown)) err-emergency-shutdown)
+      (asserts! (var-get price-valid) err-invalid-price)
+      (asserts! (>= current-collateral amount) err-low-balance)
+      ;; Check if withdrawal maintains minimum collateral ratio
+      (asserts!
+        (or
+          (is-eq current-debt u0)
+          (>= (* collateral-value u100)
+            (* current-debt (var-get minimum-collateral-ratio))
+          )
+        )
+        err-below-mcr
+      )
+      (try! (as-contract (stx-transfer? amount (as-contract tx-sender) tx-sender)))
+      (map-set vaults tx-sender (merge vault { collateral: new-collateral }))
+      (ok true)
+    )
+  )
+)
+
+;; LIQUIDATION SYSTEM
+
+(define-public (liquidate (vault-owner principal))
+  ;; Liquidate an under-collateralized vault
+  (let (
+      (vault (unwrap! (map-get? vaults vault-owner) err-low-balance))
+      (collateral (get collateral vault))
+      (debt (get debt vault))
+      (collateral-value (* collateral (var-get last-price)))
+    )
+    (begin
+      ;; Basic checks
+      (asserts! (var-get initialized) err-not-initialized)
+      (asserts! (var-get price-valid) err-invalid-price)
+      (asserts! (is-authorized-liquidator tx-sender) err-owner-only)
+      ;; Ensure vault exists and has debt
+      (asserts! (> debt u0) err-invalid-parameter)
+      ;; Check if vault is below liquidation ratio
+      (asserts!
+        (< (* collateral-value u100) (* debt (var-get liquidation-ratio)))
+        err-insufficient-collateral
+      )
+      ;; Save collateral locally to ensure consistency
+      (let ((collateral-to-transfer collateral))
+        ;; Clear vault first to prevent reentrancy
+        (map-delete vaults vault-owner)
+        ;; Transfer collateral to liquidator
+        (try! (as-contract (stx-transfer? collateral-to-transfer (as-contract tx-sender) tx-sender)))
+        (ok true)
+      )
+    )
+  )
+)
+
+;; ORACLE SYSTEM
+
+(define-public (update-price (new-price uint))
+  ;; Update the BTC/USD price feed (authorized oracles only)
+  (begin
+    (asserts! (is-authorized-oracle tx-sender) err-owner-only)
+    (asserts! (is-valid-price new-price) err-invalid-parameter)
+    (var-set last-price new-price)
+    (var-set price-valid true)
+    (ok true)
+  )
+)
+
+;; GOVERNANCE FUNCTIONS
+
+(define-public (set-minimum-collateral-ratio (new-ratio uint))
+  ;; Set the minimum collateral ratio (owner only)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (is-valid-ratio new-ratio) err-invalid-parameter)
+    (asserts! (> new-ratio (var-get liquidation-ratio)) err-invalid-parameter)
+    (var-set minimum-collateral-ratio new-ratio)
+    (ok true)
+  )
+)
