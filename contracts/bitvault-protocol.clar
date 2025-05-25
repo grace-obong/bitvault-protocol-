@@ -90,3 +90,93 @@
     (<= price maximum-price)
   )
 )
+
+(define-private (is-valid-ratio (ratio uint))
+  ;; Validates that a collateral ratio is within acceptable bounds
+  (and
+    (>= ratio minimum-ratio)
+    (<= ratio maximum-ratio)
+  )
+)
+
+(define-private (is-valid-fee (fee uint))
+  ;; Validates that a stability fee is within acceptable bounds
+  (<= fee maximum-fee)
+)
+
+;; CORE PROTOCOL FUNCTIONS
+
+(define-public (initialize (btc-price uint))
+  ;; Initialize the protocol with an initial BTC price
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (not (var-get initialized)) err-already-initialized)
+    (asserts! (is-valid-price btc-price) err-invalid-parameter)
+    (var-set last-price btc-price)
+    (var-set price-valid true)
+    (var-set initialized true)
+    (ok true)
+  )
+)
+
+(define-public (create-vault (collateral-amount uint))
+  ;; Create or add to a collateral vault by depositing STX
+  (let ((existing-vault (default-to {
+      collateral: u0,
+      debt: u0,
+      last-fee-timestamp: stacks-block-height,
+    }
+      (map-get? vaults tx-sender)
+    )))
+    (begin
+      (asserts! (var-get initialized) err-not-initialized)
+      (asserts! (not (var-get emergency-shutdown)) err-emergency-shutdown)
+      (try! (stx-transfer? collateral-amount tx-sender (as-contract tx-sender)))
+      (map-set vaults tx-sender
+        (merge existing-vault { collateral: (+ collateral-amount (get collateral existing-vault)) })
+      )
+      (ok true)
+    )
+  )
+)
+
+(define-public (mint-stablecoin (amount uint))
+  ;; Mint stablecoins against deposited collateral
+  (let (
+      (vault (unwrap! (map-get? vaults tx-sender) err-low-balance))
+      (current-collateral (get collateral vault))
+      (current-debt (get debt vault))
+      (new-debt (+ current-debt amount))
+      (collateral-value (* current-collateral (var-get last-price)))
+    )
+    (begin
+      (asserts! (var-get initialized) err-not-initialized)
+      (asserts! (not (var-get emergency-shutdown)) err-emergency-shutdown)
+      (asserts! (var-get price-valid) err-invalid-price)
+      ;; Check if new debt maintains minimum collateral ratio
+      (asserts!
+        (>= (* collateral-value u100)
+          (* new-debt (var-get minimum-collateral-ratio))
+        )
+        err-below-mcr
+      )
+      (map-set vaults tx-sender (merge vault { debt: new-debt }))
+      (ok true)
+    )
+  )
+)
+
+(define-public (repay-debt (amount uint))
+  ;; Repay stablecoin debt to reduce vault debt
+  (let (
+      (vault (unwrap! (map-get? vaults tx-sender) err-low-balance))
+      (current-debt (get debt vault))
+    )
+    (begin
+      (asserts! (var-get initialized) err-not-initialized)
+      (asserts! (>= current-debt amount) err-low-balance)
+      (map-set vaults tx-sender (merge vault { debt: (- current-debt amount) }))
+      (ok true)
+    )
+  )
+)
