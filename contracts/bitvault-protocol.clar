@@ -271,3 +271,86 @@
     (ok true)
   )
 )
+
+(define-public (set-liquidation-ratio (new-ratio uint))
+  ;; Set the liquidation threshold ratio (owner only)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (is-valid-ratio new-ratio) err-invalid-parameter)
+    (asserts! (< new-ratio (var-get minimum-collateral-ratio))
+      err-invalid-parameter
+    )
+    (var-set liquidation-ratio new-ratio)
+    (ok true)
+  )
+)
+
+(define-public (set-stability-fee (new-fee uint))
+  ;; Set the annual stability fee rate (owner only)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (is-valid-fee new-fee) err-invalid-parameter)
+    (var-set stability-fee new-fee)
+    (ok true)
+  )
+)
+
+;; AUTHORIZATION MANAGEMENT
+
+(define-public (add-liquidator (liquidator principal))
+  ;; Add an authorized liquidator (owner only)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (not (is-authorized-liquidator liquidator)) err-invalid-parameter)
+    (map-set liquidators liquidator true)
+    (ok true)
+  )
+)
+
+(define-public (remove-liquidator (liquidator principal))
+  ;; Remove an authorized liquidator (owner only)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (is-authorized-liquidator liquidator) err-invalid-parameter)
+    (map-delete liquidators liquidator)
+    (ok true)
+  )
+)
+
+(define-public (add-oracle (oracle principal))
+  ;; Add an authorized price oracle (owner only)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (not (is-authorized-oracle oracle)) err-invalid-parameter)
+    (map-set price-oracles oracle true)
+    (ok true)
+  )
+)
+
+(define-public (remove-oracle (oracle principal))
+  ;; Remove an authorized price oracle (owner only)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (is-authorized-oracle oracle) err-invalid-parameter)
+    (map-delete price-oracles oracle)
+    (ok true)
+  )
+)
+
+;; EMERGENCY CONTROLS
+
+(define-public (trigger-emergency-shutdown)
+  ;; Trigger emergency shutdown to halt all protocol operations (owner only)
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (var-set emergency-shutdown true)
+    (ok true)
+  )
+)
+
+;; READ-ONLY FUNCTIONS
+
+(define-read-only (get-vault (owner principal))
+  ;; Get vault information for a specific owner
+  (map-get? vaults owner)
+)
